@@ -1,0 +1,8 @@
+name: "cleanup"
+version: "0.1.0"
+usage: "Cleanup helm leftovers"
+description: "Identifies and cleans up resources that have been managed by Helm."
+command: "$HELM_PLUGIN_DIR/bin/cleanup"
+hooks:
+  install: "cd $HELM_PLUGIN_DIR; scripts/install_plugin.sh"
+  update: "cd $HELM_PLUGIN_DIR; scripts/install_plugin.sh"
