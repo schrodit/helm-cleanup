@@ -8,6 +8,7 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/release"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/pkg/errors"
 	common "github.com/schrodit/helm-cleanup/pkg/common"
@@ -36,12 +37,18 @@ func ListReleases(opts common.Options) ([]common.Release, error) {
 		return nil, errors.Wrap(err, "failed to list helm releases")
 	}
 
-	res := make([]common.Release, len(releases))
-	for i, r := range releases {
-		res[i] = common.Release{
+	res := []common.Release{}
+	set := sets.New[string]()
+	for _, r := range releases {
+		rel := common.Release{
 			Name:      r.Name,
 			Namespace: r.Namespace,
 		}
+		if set.Has(rel.Key()) {
+			continue
+		}
+		set.Insert(rel.Key())
+		res = append(res, rel)
 	}
 	return res, nil
 }

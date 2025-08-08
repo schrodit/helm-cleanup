@@ -1,20 +1,31 @@
 package k8s
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/schrodit/helm-cleanup/pkg/common"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+func DeleteUnstrcutured(ctx context.Context, kc *common.KubeClient, r *common.KubeResource) error {
+	resource := kc.Dynamic.Resource(r.GroupVersionResource)
+	if r.GetNamespace() != "" {
+		return resource.Namespace(r.GetNamespace()).Delete(ctx, r.GetName(), metav1.DeleteOptions{})
+	}
+	return resource.Delete(ctx, r.GetName(), metav1.DeleteOptions{})
+}
+
 // GetClientSetWithKubeConfig returns a kubernetes ClientSet
-func GetClientSetWithKubeConfig(kubeConfigFile, context string) (*kubernetes.Clientset, *dynamic.DynamicClient, error) {
+func GetClientSetWithKubeConfig(kubeConfigFile, context string) (*common.KubeClient, error) {
 	var kubeConfigFiles []string
 	if kubeConfigFile != "" {
 		kubeConfigFiles = append(kubeConfigFiles, kubeConfigFile)
@@ -36,19 +47,22 @@ func GetClientSetWithKubeConfig(kubeConfigFile, context string) (*kubernetes.Cli
 
 	config, err := buildConfigFromFlags(context, kubeConfigFiles)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to build config from flags")
+		return nil, errors.Wrap(err, "failed to build config from flags")
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to create kubeclient")
+		return nil, errors.Wrap(err, "failed to create kubeclient")
 	}
 	dyn, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to create dynamic kubeclient")
+		return nil, errors.Wrap(err, "failed to create dynamic kubeclient")
 	}
 
-	return clientset, dyn, nil
+	return &common.KubeClient{
+		Default: clientset,
+		Dynamic: dyn,
+	}, nil
 }
 
 func buildConfigFromFlags(context string, kubeConfigFiles []string) (*rest.Config, error) {

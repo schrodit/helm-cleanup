@@ -2,42 +2,35 @@ package cleanup
 
 import (
 	"context"
-	"log"
 
 	"github.com/schrodit/helm-cleanup/pkg/common"
 	"github.com/schrodit/helm-cleanup/pkg/helm"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-func ListLeakedResources(ctx context.Context, opts common.Options) ([]*unstructured.Unstructured, error) {
-	releases, err := helm.ListReleases(opts)
-	if err != nil {
-		return nil, err
-	}
-	if opts.DryRun || opts.Debug {
-		log.Println("RELEASES")
-	}
+func ListLeakedResources(
+	ctx context.Context,
+	releases []common.Release,
+	kc *common.KubeClient,
+	opts common.Options,
+) ([]*common.KubeResource, error) {
 	releasesSet := sets.New[string]()
 	for _, r := range releases {
-		if opts.DryRun || opts.Debug {
-			log.Printf("%s/%s\n", r.Namespace, r.Name)
-		}
 		releasesSet.Insert(r.Key())
 	}
-	allHelmResources, err := helm.ListHelmResources(ctx, opts.KubeConfig, opts.Namespace)
+	allHelmResources, err := helm.ListHelmResources(ctx, kc, opts.Namespace)
 	if err != nil {
 		return nil, err
 	}
 
-	leaked := []*unstructured.Unstructured{}
-	for _, u := range allHelmResources {
-		release := helm.ReleaseFromUnstructured(&u)
-		if (release.Name == "") {
+	leaked := []*common.KubeResource{}
+	for _, r := range allHelmResources {
+		release := helm.ReleaseFromKubeResource(r)
+		if release.Name == "" {
 			continue
 		}
 		if !releasesSet.Has(release.Key()) {
-			leaked = append(leaked, u.DeepCopy())
+			leaked = append(leaked, r)
 		}
 	}
 	return leaked, nil

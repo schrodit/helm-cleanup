@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
+	"github.com/pkg/errors"
 	"github.com/schrodit/helm-cleanup/pkg/cleanup"
 	"github.com/schrodit/helm-cleanup/pkg/common"
+	"github.com/schrodit/helm-cleanup/pkg/helm"
+	"github.com/schrodit/helm-cleanup/pkg/k8s"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +19,7 @@ type Options struct {
 	DryRun    bool
 	Debug     bool
 	Namespace string
+	Yes       bool
 }
 
 var (
@@ -33,6 +38,7 @@ func newRootCmd() *cobra.Command {
 				DryRun:    settings.DryRun,
 				Debug:     settings.Debug,
 				Namespace: settings.Namespace,
+				Yes:       settings.Yes,
 			}
 			kubeConfig := common.KubeConfig{
 				Context: settings.KubeContext,
@@ -57,7 +63,7 @@ func newRootCmd() *cobra.Command {
 		settings.KubeContext = ctx
 	}
 
-	if debug := os.Getenv("HELM_DEBUG"); debug != "" {
+	if debug := os.Getenv("HELM_DEBUG"); debug == "true" {
 		settings.Debug = true
 	}
 
@@ -71,7 +77,7 @@ func newRootCmd() *cobra.Command {
 
 // Checks all resources managed by helm and cleans up resources that do not
 // have a corresponding Helm release.
-func Cleanup(opts Options, kubeConfig common.KubeConfig) error {
+func Cleanup(opts Options, kc common.KubeConfig) error {
 	if opts.DryRun {
 		log.Println("NOTE: This is in dry-run mode, the following actions will not be executed.")
 		log.Println("Run without --dry-run to take the actions described below:")
@@ -81,23 +87,50 @@ func Cleanup(opts Options, kubeConfig common.KubeConfig) error {
 	options := common.Options{
 		DryRun:     opts.DryRun,
 		Debug:      opts.Debug,
-		KubeConfig: kubeConfig,
+		KubeConfig: kc,
 		Namespace:  opts.Namespace,
 	}
 
-	leaked, err := cleanup.ListLeakedResources(context.TODO(), options)
+	ctx := context.Background()
+
+	client, err := k8s.GetClientSetWithKubeConfig(kc.File, kc.Context)
+	if err != nil {
+		return errors.Wrap(err, "unable to create kubernetes client")
+	}
+
+	releases, err := helm.ListReleases(options)
+	if err != nil {
+		return err
+	}
+	if opts.Debug {
+		common.PrintReleasesTable(releases)
+	}
+
+	leaked, err := cleanup.ListLeakedResources(ctx, releases, client, options)
 	if err != nil {
 		return err
 	}
 	log.Printf("Found %d leaked resources\n", len(leaked))
-	if opts.DryRun || opts.Debug {
-		log.Println("LEAKED RESOURCES:")
-		for _, u := range leaked {
-			log.Printf("(%s %s) %s %s\n", u.GetAPIVersion(), u.GetKind(), u.GetName(), u.GetNamespace())
-		}
-	}
+	helm.PrintK8sResourceTable(leaked)
 	if opts.DryRun {
 		return nil
+	}
+
+	for _, u := range leaked {
+		id := fmt.Sprintf("(%s %s) %s/%s", u.GetAPIVersion(), u.GetKind(), u.GetNamespace(), u.GetName())
+		log.Printf("Deleting resource %s", id)
+		if !opts.Yes {
+			confirmation := common.InputPrompt("Please confirm deletion of resource (y)")
+			if confirmation != "y" {
+				fmt.Println("Skip deletion of resource")
+				continue
+			}
+		}
+		if err := k8s.DeleteUnstrcutured(ctx, client, u); err != nil {
+			return errors.Wrapf(err, "failed deleting %s", id)
+		}
+		log.Printf("Deleted resource %s", id)
+		log.Println()
 	}
 
 	return nil
