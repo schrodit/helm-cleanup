@@ -46,4 +46,3 @@ mv "releases/v${version}/cleanup" "bin/cleanup" || \
 mv "releases/v${version}/plugin.yaml" .
 mv "releases/v${version}/README.md" .
 mv "releases/v${version}/LICENSE" .
-mv "releases/v${version}/config/Map.yaml" "config/Map.yaml"
